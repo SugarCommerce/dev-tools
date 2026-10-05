@@ -1,0 +1,39 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Load pages in headless Chrome and fail on any console error.
+ *
+ * Usage:
+ *   vendor/bin/smoke --seed='php bin/seed.php' \
+ *       --serve='php -S 127.0.0.1:{port} -t public' \
+ *       --env=DB_PATH={work}/smoke.db --page=/ --page=/about
+ *
+ * Options: --seed=CMD, --serve=CMD ({port}, {work}), --page=PATH (repeats;
+ * a bare argument is a page too), --pages-from=CMD (run after the seed; one
+ * path per line; gets SMOKE_WORK, SMOKE_SEED and SMOKE_PORT), --env=K=V
+ * (repeats), --php-errors=FILE, --ignore=TEXT|/REGEX/ (repeats),
+ * --chrome=PATH, --host=127.0.0.1, --port=N, --parallel=6, --budget=3000
+ * (ms of virtual time), --timeout=20 (s per page), --keep.
+ *
+ * Exits 0 when clean, 1 on any failure, 2 when it could not run.
+ *
+ * @package   SugarCommerce\DevTools
+ * @copyright Copyright (c) 2026, ArrayPress Limited
+ * @license   GPL-2.0-or-later
+ * @since     1.0.0
+ */
+
+declare( strict_types=1 );
+
+require __DIR__ . '/autoload.php';
+
+use SugarCommerce\DevTools\Smoke;
+
+try {
+	$options = Smoke::options( array_slice( $argv, 1 ) );
+} catch ( \InvalidArgumentException $e ) {
+	fwrite( STDERR, $e->getMessage() . "\n" );
+	exit( 2 );
+}
+
+exit( ( new Smoke( $options ) )->run() );

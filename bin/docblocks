@@ -1,0 +1,27 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Report every class, function and method with no docblock above it.
+ *
+ * Usage: vendor/bin/docblocks [src bin …]
+ *
+ * Roots default to src. Prints `path:line  name` per miss, then "N missing",
+ * and exits 1 when anything is missing, so it can gate a build.
+ *
+ * @package   SugarCommerce\DevTools
+ * @copyright Copyright (c) 2026, ArrayPress Limited
+ * @license   GPL-2.0-or-later
+ * @since     1.0.0
+ */
+
+declare( strict_types=1 );
+
+require __DIR__ . '/autoload.php';
+
+use SugarCommerce\DevTools\Docblocks;
+
+$missing = Docblocks::scan( array_slice( $argv, 1 ) ?: array( 'src' ) );
+
+echo Docblocks::report( $missing );
+
+exit( $missing ? 1 : 0 );
