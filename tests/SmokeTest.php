@@ -188,6 +188,75 @@ final class SmokeTest extends TestCase {
 		$this->assertContains( '--dump-dom', $args );
 	}
 
+	public function test_a_page_cannot_name_another_host(): void {
+		$this->assertSame( 'http://127.0.0.1:8080/', Smoke::url( 'http://127.0.0.1:8080', '/' ) );
+		$this->assertSame( 'http://127.0.0.1:8080/d/abc?x=1', Smoke::url( 'http://127.0.0.1:8080', '/d/abc?x=1' ) );
+
+		// Without the slash, everything before the @ would be a user name.
+		$url = Smoke::url( 'http://127.0.0.1:8080', '@evil.example/steal' );
+
+		$this->assertSame( 'http://127.0.0.1:8080/@evil.example/steal', $url );
+		$this->assertSame( '127.0.0.1', parse_url( $url, PHP_URL_HOST ) );
+	}
+
+	public function test_killing_one_profile_spares_its_neighbours(): void {
+		$pattern = '~' . Smoke::profile_pattern( '/tmp/w.1/chrome-1' ) . '~';
+
+		$this->assertSame( 1, preg_match( $pattern, 'chrome --user-data-dir=/tmp/w.1/chrome-1 --v=0' ) );
+		$this->assertSame( 1, preg_match( $pattern, 'chrome --type=renderer --user-data-dir=/tmp/w.1/chrome-1' ) );
+		$this->assertSame( 0, preg_match( $pattern, 'chrome --user-data-dir=/tmp/w.1/chrome-10 --v=0' ) );
+		$this->assertSame( 0, preg_match( $pattern, 'chrome --user-data-dir=/tmp/wx1/chrome-1 --v=0' ) );
+	}
+
+	public function test_killing_one_profile_spares_its_neighbours_in_pkill_s_own_dialect(): void {
+		if ( '' === trim( (string) shell_exec( 'command -v grep 2>/dev/null' ) ) ) {
+			$this->markTestSkipped( 'No grep.' );
+		}
+
+		$grep = static function ( string $line ): string {
+			$process = proc_open( array( 'grep', '-E', '--', Smoke::profile_pattern( '/tmp/w.1/chrome-1' ) ), array( 0 => array( 'pipe', 'r' ), 1 => array( 'pipe', 'w' ) ), $pipes );
+			fwrite( $pipes[0], $line . "\n" );
+			fclose( $pipes[0] );
+			$out = (string) stream_get_contents( $pipes[1] );
+			proc_close( $process );
+
+			return trim( $out );
+		};
+
+		$this->assertSame( 'chrome --user-data-dir=/tmp/w.1/chrome-1 --v=0', $grep( 'chrome --user-data-dir=/tmp/w.1/chrome-1 --v=0' ) );
+		$this->assertSame( '', $grep( 'chrome --user-data-dir=/tmp/w.1/chrome-10 --v=0' ) );
+	}
+
+	/* ─── Options given directly ───────────────────────────────────── */
+
+	public function test_options_given_directly_keep_the_defaults_for_the_rest(): void {
+		$this->assertInstanceOf( Smoke::class, new Smoke( array( 'pages' => array( '/' ), 'parallel' => 2 ) ) );
+	}
+
+	public function test_an_option_of_the_wrong_type_is_refused(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		new Smoke( array( 'pages' => '/' ) );
+	}
+
+	public function test_an_env_with_no_name_is_refused(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		Smoke::options( array( '--env==value' ) );
+	}
+
+	/* ─── Printing what a page said ────────────────────────────────── */
+
+	public function test_control_characters_in_a_console_message_are_replaced(): void {
+		$log = '[x:INFO:CONSOLE(3)] "Uncaught Error: ' . "\x1b[2J\x1b]0;owned\x07\r" . 'ok", source: x';
+
+		$this->assertSame( array( '"Uncaught Error: ?[2J?]0;owned??ok", source: x' ), Smoke::console_errors( $log ) );
+	}
+
+	public function test_control_characters_in_a_php_log_line_are_replaced(): void {
+		$this->assertSame( array( "PHP Warning: \t?[31mred" ), Smoke::php_errors( "PHP Warning: \t\x1b[31mred\n" ) );
+	}
+
 	/* ─── Running ──────────────────────────────────────────────────── */
 
 	public function test_a_run_seeds_serves_loads_and_reports(): void {

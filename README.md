@@ -86,7 +86,7 @@ FAIL /s/demo
 |---|---|
 | `--seed=CMD` | Run once, first. Its output is saved to `{work}/seed.txt`; a non-zero exit stops the run and prints it. |
 | `--serve=CMD` | The server, with `{port}` (and `{work}`) filled in. Waited on until it accepts a connection. |
-| `--page=PATH` | A page to load. Repeats; a bare argument is a page too. |
+| `--page=PATH` | A page to load. Repeats; a bare argument is a page too. Always a path on the server under test: one without a leading `/` is given one. |
 | `--pages-from=CMD` | Run after the seed; prints one path per line. Gets `SMOKE_WORK`, `SMOKE_SEED` and `SMOKE_PORT`. |
 | `--env=NAME=VALUE` | Set for every command. Repeats; `{work}` is filled in. |
 | `--php-errors=FILE` | An error log to read after the run. Any line left fails it. |
@@ -98,6 +98,8 @@ FAIL /s/demo
 | `--timeout=20` | Seconds before a page's browser is killed. |
 | `--keep` | Leave the scratch directory (logs, database) and print where it is. |
 
+`--seed`, `--serve` and `--pages-from` are shell commands, run as written: put only your own commands there, never anything a page or a request supplied. What comes back — page paths, console messages, log lines — is treated as data: a path cannot point the browser at another host, and control characters are replaced before anything is printed.
+
 Exits 0 when every page is clean, 1 on any console error, PHP log line or failed seed, and 2 when it could not run (no Chrome, a server that did not start, a bad option).
 
 ## Testing
@@ -107,7 +109,7 @@ composer install
 composer test
 ```
 
-42 tests. The docblock scanner against every kind of declaration, modifiers, stacked attributes with brackets inside them, `::class`, closures, anonymous classes, multi-line `use function` and line numbers, and output byte-identical to the script it replaced. The smoke checker's option parsing, Chrome discovery order, free ports, console and error-log parsing, and a whole run end to end — seed, environment, a real PHP server and a stand-in browser — that reports one clean page and one failing one.
+50 tests. The docblock scanner against every kind of declaration, modifiers, stacked attributes with brackets inside them, `::class`, closures, anonymous classes, multi-line `use function` and line numbers, and output byte-identical to the script it replaced. The smoke checker's option parsing, Chrome discovery order, free ports, console and error-log parsing, and a whole run end to end — seed, environment, a real PHP server and a stand-in browser — that reports one clean page and one failing one.
 
 ## License
 

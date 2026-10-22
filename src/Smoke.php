@@ -42,7 +42,30 @@ namespace SugarCommerce\DevTools;
  * A PHP warning in the server's error log fails the run too: a page that
  * half-rendered can still have run every script it got without complaint.
  *
+ * The seed, serve and pages commands are shell commands, run as given: they
+ * come from whoever runs the check, never from the pages it loads. What the
+ * pages and logs say is treated as data — a page path can only ever be a
+ * path on the server under test, and control characters in anything printed
+ * are replaced, so a page cannot steer the browser elsewhere or the terminal.
+ *
  * @since 1.0.0
+ *
+ * @phpstan-type Options array{
+ *     seed: string,
+ *     serve: string,
+ *     pages: list<string>,
+ *     pages_from: string,
+ *     env: array<string, string>,
+ *     php_errors: string,
+ *     ignore: list<string>,
+ *     chrome: string,
+ *     parallel: int,
+ *     budget: int,
+ *     timeout: int,
+ *     keep: bool,
+ *     port: int,
+ *     host: string
+ * }
  */
 final class Smoke {
 
@@ -59,14 +82,14 @@ final class Smoke {
 	/**
 	 * Commands tried, in order, when no Chrome was named.
 	 *
-	 * @var string[]
+	 * @var list<string>
 	 */
 	public const array CHROMES = array( 'chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable' );
 
 	/**
 	 * The defaults for every option.
 	 *
-	 * @var array<string, mixed>
+	 * @var Options
 	 */
 	public const array DEFAULTS = array(
 		'seed'       => '',
@@ -84,6 +107,13 @@ final class Smoke {
 		'port'       => 0,
 		'host'       => '127.0.0.1',
 	);
+
+	/**
+	 * The options, every key present and of its type.
+	 *
+	 * @var Options
+	 */
+	private readonly array $options;
 
 	/**
 	 * The scratch directory, once made.
@@ -104,16 +134,22 @@ final class Smoke {
 	 *
 	 * @since 1.0.0
 	 *
-	 * @param array<string, mixed> $options From options(), or the DEFAULTS
-	 *                                      keys set directly.
+	 * @param array<string, mixed> $options From options(), or any of the
+	 *                                      DEFAULTS keys set directly; the
+	 *                                      rest keep their defaults.
 	 * @param resource             $out     Where the report goes.
 	 * @param resource             $err     Where problems go.
+	 *
+	 * @throws \InvalidArgumentException When an option is not of its
+	 *                                   default's type.
 	 */
 	public function __construct(
-		private readonly array $options,
+		array $options,
 		private $out = STDOUT,
 		private $err = STDERR,
-	) {}
+	) {
+		$this->options = self::settle( $options );
+	}
 
 	/* ─── Options ───────────────────────────────────────────────────── */
 
@@ -127,7 +163,7 @@ final class Smoke {
 	 *
 	 * @param string[] $args Arguments, without the script name.
 	 *
-	 * @return array<string, mixed>
+	 * @return Options
 	 *
 	 * @throws \InvalidArgumentException On an option it does not know, or a
 	 *                                   number that is not one.
@@ -141,8 +177,10 @@ final class Smoke {
 				continue;
 			}
 
-			[ $name, $value ] = array_pad( explode( '=', substr( $arg, 2 ), 2 ), 2, null );
-			$key              = str_replace( '-', '_', $name );
+			$parts = explode( '=', substr( $arg, 2 ), 2 );
+			$name  = $parts[0];
+			$value = $parts[1] ?? null;
+			$key   = str_replace( '-', '_', $name );
 
 			switch ( $key ) {
 				case 'keep':
@@ -155,7 +193,7 @@ final class Smoke {
 					break;
 
 				case 'env':
-					if ( null === $value || ! str_contains( $value, '=' ) ) {
+					if ( null === $value || ! str_contains( $value, '=' ) || str_starts_with( $value, '=' ) ) {
 						throw new \InvalidArgumentException( '--env needs NAME=value' );
 					}
 
@@ -200,7 +238,7 @@ final class Smoke {
 	 *
 	 * @param string $text Output.
 	 *
-	 * @return string[]
+	 * @return list<string>
 	 */
 	public static function pages( string $text ): array {
 		return array_values( array_filter( array_map( 'trim', explode( "\n", $text ) ), static fn ( string $line ): bool => '' !== $line ) );
@@ -236,12 +274,15 @@ final class Smoke {
 	 *
 	 * @since 1.0.0
 	 *
-	 * @param string        $given      `--chrome`, or ''.
-	 * @param string        $variable   The CHROME environment variable, or ''.
-	 * @param \Closure|null $executable fn( string $path ): bool. Defaults to
-	 *                                  is_executable().
-	 * @param \Closure|null $which      fn( string $command ): string, the
-	 *                                  path or ''. Defaults to `command -v`.
+	 * @param string                          $given      `--chrome`, or ''.
+	 * @param string                          $variable   The CHROME environment
+	 *                                                    variable, or ''.
+	 * @param (\Closure(string): bool)|null   $executable Whether a path can be
+	 *                                                    run. Defaults to
+	 *                                                    is_executable().
+	 * @param (\Closure(string): string)|null $which      A command's path, or
+	 *                                                    ''. Defaults to
+	 *                                                    `command -v`.
 	 *
 	 * @return string|null
 	 */
@@ -299,11 +340,14 @@ final class Smoke {
 	/**
 	 * The console errors in a Chrome log, each trimmed to its message.
 	 *
+	 * The message is the page's own text, so any control character in it is
+	 * replaced before it can reach a terminal.
+	 *
 	 * @since 1.0.0
 	 *
 	 * @param string $log Chrome's stderr with `--enable-logging=stderr`.
 	 *
-	 * @return string[]
+	 * @return list<string>
 	 */
 	public static function console_errors( string $log ): array {
 		$errors = array();
@@ -312,7 +356,7 @@ final class Smoke {
 			if ( 1 === preg_match( self::CONSOLE, $line ) ) {
 				// Everything up to the quoted message is Chrome's prefix:
 				// process, time, source file.
-				$errors[] = (string) preg_replace( '/.*CONSOLE[^"]*/', '', $line );
+				$errors[] = self::printable( (string) preg_replace( '/.*CONSOLE[^"]*/', '', $line ) );
 			}
 		}
 
@@ -329,7 +373,7 @@ final class Smoke {
 	 *                         with no API key logging every 401, say. Plain
 	 *                         text, or a delimited regular expression.
 	 *
-	 * @return string[]
+	 * @return list<string> The lines kept, control characters replaced.
 	 */
 	public static function php_errors( string $log, array $ignore = array() ): array {
 		$kept = array();
@@ -345,7 +389,7 @@ final class Smoke {
 				}
 			}
 
-			$kept[] = $line;
+			$kept[] = self::printable( $line );
 		}
 
 		return $kept;
@@ -359,7 +403,7 @@ final class Smoke {
 	 * @param string[] $lines Lines.
 	 * @param int      $limit How many to keep.
 	 *
-	 * @return string[]
+	 * @return list<string>
 	 */
 	public static function tally( array $lines, int $limit = 20 ): array {
 		$counts = array_count_values( $lines );
@@ -385,7 +429,7 @@ final class Smoke {
 	 * @param string $profile A user data directory of its own.
 	 * @param int    $budget  Virtual time, in milliseconds.
 	 *
-	 * @return string[]
+	 * @return list<string>
 	 */
 	public static function browser( string $chrome, string $url, string $profile, int $budget ): array {
 		return array(
@@ -403,6 +447,43 @@ final class Smoke {
 		);
 	}
 
+	/**
+	 * The address a page is loaded from: the server under test, always.
+	 *
+	 * A page path is joined on after the port, so one that does not start
+	 * with `/` — `@example.com/`, printed by a seed that put user data in a
+	 * path — would make everything before it a user name and load another
+	 * host entirely. It is given a leading `/` instead.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param string $base Scheme, host and port, no trailing slash.
+	 * @param string $page A path on that server.
+	 *
+	 * @return string
+	 */
+	public static function url( string $base, string $page ): string {
+		return $base . ( str_starts_with( $page, '/' ) ? '' : '/' ) . $page;
+	}
+
+	/**
+	 * The `pkill -f` pattern for every process using one profile.
+	 *
+	 * Anchored at the end and escaped, so killing what is left of the
+	 * browser for `chrome-1` cannot also kill `chrome-10` while it is still
+	 * loading its page — which would report that page clean having never
+	 * read it.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param string $profile The profile's directory.
+	 *
+	 * @return string An extended regular expression.
+	 */
+	public static function profile_pattern( string $profile ): string {
+		return '--user-data-dir=' . addcslashes( $profile, '.[]()*+?{}|^$\\' ) . '( |$)';
+	}
+
 	/* ─── Running ───────────────────────────────────────────────────── */
 
 	/**
@@ -414,7 +495,7 @@ final class Smoke {
 	 *             could not run at all.
 	 */
 	public function run(): int {
-		$chrome = self::chrome( (string) $this->options['chrome'], (string) getenv( 'CHROME' ) );
+		$chrome = self::chrome( $this->options['chrome'], (string) getenv( 'CHROME' ) );
 
 		if ( null === $chrome ) {
 			fwrite( $this->err, "Chrome not found; set CHROME.\n" );
@@ -422,7 +503,15 @@ final class Smoke {
 			return 2;
 		}
 
-		$this->work = self::scratch();
+		$work = self::scratch();
+
+		if ( null === $work ) {
+			fwrite( $this->err, "Could not make a scratch directory.\n" );
+
+			return 2;
+		}
+
+		$this->work = $work;
 
 		try {
 			return $this->within( $chrome );
@@ -445,26 +534,26 @@ final class Smoke {
 	 * @return int
 	 */
 	private function within( string $chrome ): int {
-		$port = (int) $this->options['port'] ?: self::free_port( (string) $this->options['host'] );
+		$port = $this->options['port'] ?: self::free_port( $this->options['host'] );
 		$vars = array( 'work' => $this->work, 'port' => $port );
 		$env  = $this->environment( $vars );
 
 		if ( '' !== $this->options['seed'] ) {
 			$seed = $this->work . '/seed.txt';
 
-			if ( 0 !== self::execute( self::expand( (string) $this->options['seed'], $vars ), $env, $seed ) ) {
+			if ( 0 !== self::execute( self::expand( $this->options['seed'], $vars ), $env, $seed ) ) {
 				fwrite( $this->out, (string) @file_get_contents( $seed ) );
 
 				return 1;
 			}
 		}
 
-		$pages = array_map( static fn ( string $page ): string => self::expand( $page, $vars ), (array) $this->options['pages'] );
+		$pages = array_map( static fn ( string $page ): string => self::expand( $page, $vars ), $this->options['pages'] );
 
 		if ( '' !== $this->options['pages_from'] ) {
 			$listed = $this->work . '/pages.txt';
 
-			if ( 0 !== self::execute( self::expand( (string) $this->options['pages_from'], $vars ), $env, $listed ) ) {
+			if ( 0 !== self::execute( self::expand( $this->options['pages_from'], $vars ), $env, $listed ) ) {
 				fwrite( $this->err, "The pages command failed.\n" );
 
 				return 1;
@@ -473,7 +562,7 @@ final class Smoke {
 			$pages = array_merge( $pages, self::pages( (string) file_get_contents( $listed ) ) );
 		}
 
-		if ( '' !== $this->options['serve'] && ! $this->start( self::expand( (string) $this->options['serve'], $vars ), $env, $port ) ) {
+		if ( '' !== $this->options['serve'] && ! $this->start( self::expand( $this->options['serve'], $vars ), $env, $port ) ) {
 			fwrite( $this->err, "The server did not start:\n" . (string) @file_get_contents( $this->work . '/server.log' ) );
 
 			return 2;
@@ -484,7 +573,7 @@ final class Smoke {
 
 		foreach ( $this->load( $chrome, $base, $pages ) as [ $page, $errors ] ) {
 			if ( $errors ) {
-				fwrite( $this->out, 'FAIL ' . $page . "\n" );
+				fwrite( $this->out, 'FAIL ' . self::printable( $page ) . "\n" );
 
 				foreach ( $errors as $error ) {
 					fwrite( $this->out, '     ' . $error . "\n" );
@@ -492,13 +581,13 @@ final class Smoke {
 
 				$failed = 1;
 			} else {
-				fwrite( $this->out, 'ok   ' . $page . "\n" );
+				fwrite( $this->out, 'ok   ' . self::printable( $page ) . "\n" );
 			}
 		}
 
 		if ( '' !== $this->options['php_errors'] ) {
-			$file   = self::expand( (string) $this->options['php_errors'], $vars );
-			$logged = self::php_errors( is_file( $file ) ? (string) file_get_contents( $file ) : '', (array) $this->options['ignore'] );
+			$file   = self::expand( $this->options['php_errors'], $vars );
+			$logged = self::php_errors( is_file( $file ) ? (string) file_get_contents( $file ) : '', $this->options['ignore'] );
 
 			if ( $logged ) {
 				fwrite( $this->out, "PHP logged:\n" );
@@ -517,36 +606,45 @@ final class Smoke {
 	/**
 	 * Open each page, a batch at a time, and collect its console errors.
 	 *
-	 * @param string   $chrome Chrome's path.
-	 * @param string   $base   Scheme, host and port.
-	 * @param string[] $pages  Paths.
+	 * A browser that could not be started is a failure for its page, not a
+	 * page with nothing in its console.
 	 *
-	 * @return array<int, array{0: string, 1: string[]}> Each page with its
+	 * @param string       $chrome Chrome's path.
+	 * @param string       $base   Scheme, host and port.
+	 * @param list<string> $pages  Paths.
+	 *
+	 * @return list<array{0: string, 1: list<string>}> Each page with its
 	 *                                                 errors, in the order
 	 *                                                 given.
 	 */
 	private function load( string $chrome, string $base, array $pages ): array {
-		$results = array();
+		$results  = array();
+		$unopened = array();
 
-		foreach ( array_chunk( $pages, (int) $this->options['parallel'], true ) as $batch ) {
+		foreach ( array_chunk( $pages, max( 1, $this->options['parallel'] ), true ) as $batch ) {
 			$running = array();
 
 			foreach ( $batch as $n => $page ) {
 				$profile = $this->work . '/chrome-' . $n;
 				$process = proc_open(
-					self::browser( $chrome, $base . $page, $profile, (int) $this->options['budget'] ),
+					self::browser( $chrome, self::url( $base, $page ), $profile, $this->options['budget'] ),
 					array( 0 => array( 'file', '/dev/null', 'r' ), 1 => array( 'file', '/dev/null', 'w' ), 2 => array( 'file', $this->work . '/log-' . $n, 'w' ) ),
 					$pipes
 				);
+
+				if ( false === $process ) {
+					$unopened[ $n ] = true;
+					continue;
+				}
 
 				$running[ $n ] = array( $process, $profile, microtime( true ) );
 			}
 
 			while ( $running ) {
 				foreach ( $running as $n => [ $process, $profile, $started ] ) {
-					$alive = is_resource( $process ) && proc_get_status( $process )['running'];
+					$alive = proc_get_status( $process )['running'];
 
-					if ( $alive && microtime( true ) - $started < (int) $this->options['timeout'] ) {
+					if ( $alive && microtime( true ) - $started < $this->options['timeout'] ) {
 						continue;
 					}
 
@@ -554,13 +652,11 @@ final class Smoke {
 						proc_terminate( $process, 9 );
 					}
 
-					if ( is_resource( $process ) ) {
-						proc_close( $process );
-					}
+					proc_close( $process );
 
 					// Helper processes outlive the browser; they are the ones
 					// holding its profile.
-					exec( 'pkill -f -- ' . escapeshellarg( '--user-data-dir=' . $profile ) . ' 2>/dev/null' );
+					self::kill( $profile );
 
 					unset( $running[ $n ] );
 				}
@@ -572,12 +668,38 @@ final class Smoke {
 		}
 
 		foreach ( $pages as $n => $page ) {
+			if ( isset( $unopened[ $n ] ) ) {
+				$results[] = array( $page, array( 'The browser did not start.' ) );
+				continue;
+			}
+
 			$log = $this->work . '/log-' . $n;
 
 			$results[] = array( $page, self::console_errors( is_file( $log ) ? (string) file_get_contents( $log ) : '' ) );
 		}
 
 		return $results;
+	}
+
+	/**
+	 * Kill every process still using a profile.
+	 *
+	 * Run without a shell, so nothing in the path is ever interpreted.
+	 *
+	 * @param string $profile The profile's directory.
+	 *
+	 * @return void
+	 */
+	private static function kill( string $profile ): void {
+		$process = proc_open(
+			array( 'pkill', '-f', '--', self::profile_pattern( $profile ) ),
+			array( 0 => array( 'file', '/dev/null', 'r' ), 1 => array( 'file', '/dev/null', 'w' ), 2 => array( 'file', '/dev/null', 'w' ) ),
+			$pipes
+		);
+
+		if ( false !== $process ) {
+			proc_close( $process );
+		}
 	}
 
 	/**
@@ -592,7 +714,7 @@ final class Smoke {
 	private function start( string $command, array $env, int $port ): bool {
 		// `exec`, so the process we hold is the server and not a shell that
 		// would survive being told to stop while its child kept serving.
-		$this->server = proc_open(
+		$server = proc_open(
 			'exec ' . $command,
 			array( 0 => array( 'file', '/dev/null', 'r' ), 1 => array( 'file', $this->work . '/server.log', 'w' ), 2 => array( 'file', $this->work . '/server.log', 'a' ) ),
 			$pipes,
@@ -600,12 +722,18 @@ final class Smoke {
 			$env
 		);
 
+		if ( false === $server ) {
+			return false;
+		}
+
+		$this->server = $server;
+
 		for ( $tries = 0; $tries < 50; $tries++ ) {
-			if ( ! is_resource( $this->server ) || ! proc_get_status( $this->server )['running'] ) {
+			if ( ! proc_get_status( $server )['running'] ) {
 				return false;
 			}
 
-			$socket = @fsockopen( (string) $this->options['host'], $port, $code, $message, 0.2 );
+			$socket = @fsockopen( $this->options['host'], $port, $code, $message, 0.2 );
 
 			if ( false !== $socket ) {
 				fclose( $socket );
@@ -643,8 +771,8 @@ final class Smoke {
 	private function environment( array $vars ): array {
 		$env = getenv();
 
-		foreach ( (array) $this->options['env'] as $name => $value ) {
-			$env[ (string) $name ] = self::expand( (string) $value, $vars );
+		foreach ( $this->options['env'] as $name => $value ) {
+			$env[ $name ] = self::expand( $value, $vars );
 		}
 
 		$env['SMOKE_WORK'] = $this->work;
@@ -673,24 +801,25 @@ final class Smoke {
 			$env
 		);
 
-		return is_resource( $process ) ? proc_close( $process ) : 1;
+		return false !== $process ? proc_close( $process ) : 1;
 	}
 
 	/**
-	 * A new scratch directory.
+	 * A new scratch directory, readable by this user alone.
 	 *
-	 * @return string
+	 * @return string|null Its path, or null when it could not be made.
 	 */
-	private static function scratch(): string {
+	private static function scratch(): ?string {
 		$dir = rtrim( sys_get_temp_dir(), '/' ) . '/smoke-' . bin2hex( random_bytes( 6 ) );
 
-		mkdir( $dir, 0700, true );
-
-		return $dir;
+		return @mkdir( $dir, 0700, true ) ? $dir : null;
 	}
 
 	/**
 	 * Delete a directory and everything in it.
+	 *
+	 * Links are removed, never followed, so a link left in the scratch
+	 * directory cannot take anything outside it with it.
 	 *
 	 * @param string $dir Directory.
 	 *
@@ -707,6 +836,10 @@ final class Smoke {
 		);
 
 		foreach ( $items as $item ) {
+			if ( ! $item instanceof \SplFileInfo ) {
+				continue;
+			}
+
 			$item->isDir() && ! $item->isLink() ? @rmdir( $item->getPathname() ) : @unlink( $item->getPathname() );
 		}
 
@@ -726,5 +859,147 @@ final class Smoke {
 		$regex = 1 === preg_match( '/^([\/#~]).+\1[imsxu]*$/', $pattern );
 
 		return $regex ? 1 === @preg_match( $pattern, $line ) : str_contains( $line, $pattern );
+	}
+
+	/**
+	 * Text with its control characters replaced by `?`, safe to print.
+	 *
+	 * An escape sequence in a console message or a log line could otherwise
+	 * rewrite what the terminal, or a CI log viewer, shows.
+	 *
+	 * @param string $text Text from a page or a log.
+	 *
+	 * @return string
+	 */
+	private static function printable( string $text ): string {
+		return (string) preg_replace( '/[\x00-\x08\x0B-\x1F\x7F]/', '?', $text );
+	}
+
+	/**
+	 * Options with every key present, each checked against its default.
+	 *
+	 * Keys it does not know are dropped, as they always were.
+	 *
+	 * @param array<mixed> $options Options as given.
+	 *
+	 * @return Options
+	 *
+	 * @throws \InvalidArgumentException When a value is not of its
+	 *                                   default's type.
+	 */
+	private static function settle( array $options ): array {
+		$given = $options + self::DEFAULTS;
+
+		return array(
+			'seed'       => self::text( $given['seed'], 'seed' ),
+			'serve'      => self::text( $given['serve'], 'serve' ),
+			'pages'      => array_map( static fn ( mixed $page ): string => self::text( $page, 'pages' ), array_values( self::listed( $given['pages'], 'pages' ) ) ),
+			'pages_from' => self::text( $given['pages_from'], 'pages_from' ),
+			'env'        => self::environment_variables( $given['env'] ),
+			'php_errors' => self::text( $given['php_errors'], 'php_errors' ),
+			'ignore'     => array_map( static fn ( mixed $text ): string => self::text( $text, 'ignore' ), array_values( self::listed( $given['ignore'], 'ignore' ) ) ),
+			'chrome'     => self::text( $given['chrome'], 'chrome' ),
+			'parallel'   => max( 1, self::number( $given['parallel'], 'parallel' ) ),
+			'budget'     => self::number( $given['budget'], 'budget' ),
+			'timeout'    => self::number( $given['timeout'], 'timeout' ),
+			'keep'       => self::flag( $given['keep'], 'keep' ),
+			'port'       => self::number( $given['port'], 'port' ),
+			'host'       => self::text( $given['host'], 'host' ),
+		);
+	}
+
+	/**
+	 * A string option.
+	 *
+	 * @param mixed  $value The value.
+	 * @param string $name  The option, for the message.
+	 *
+	 * @return string
+	 *
+	 * @throws \InvalidArgumentException When it is not a string.
+	 */
+	private static function text( mixed $value, string $name ): string {
+		if ( ! is_string( $value ) ) {
+			throw new \InvalidArgumentException( $name . ' must be a string' );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * A whole-number option, zero or more.
+	 *
+	 * @param mixed  $value The value.
+	 * @param string $name  The option, for the message.
+	 *
+	 * @return int
+	 *
+	 * @throws \InvalidArgumentException When it is not a non-negative int.
+	 */
+	private static function number( mixed $value, string $name ): int {
+		if ( ! is_int( $value ) || $value < 0 ) {
+			throw new \InvalidArgumentException( $name . ' must be a whole number' );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * A yes-or-no option.
+	 *
+	 * @param mixed  $value The value.
+	 * @param string $name  The option, for the message.
+	 *
+	 * @return bool
+	 *
+	 * @throws \InvalidArgumentException When it is not a bool.
+	 */
+	private static function flag( mixed $value, string $name ): bool {
+		if ( ! is_bool( $value ) ) {
+			throw new \InvalidArgumentException( $name . ' must be true or false' );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * A list option.
+	 *
+	 * @param mixed  $value The value.
+	 * @param string $name  The option, for the message.
+	 *
+	 * @return array<mixed>
+	 *
+	 * @throws \InvalidArgumentException When it is not an array.
+	 */
+	private static function listed( mixed $value, string $name ): array {
+		if ( ! is_array( $value ) ) {
+			throw new \InvalidArgumentException( $name . ' must be a list' );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * The env option: names to values, both strings.
+	 *
+	 * @param mixed $value The value.
+	 *
+	 * @return array<string, string>
+	 *
+	 * @throws \InvalidArgumentException When it is not, or a name is empty.
+	 */
+	private static function environment_variables( mixed $value ): array {
+		$env = array();
+
+		foreach ( self::listed( $value, 'env' ) as $name => $setting ) {
+			if ( '' === (string) $name ) {
+				throw new \InvalidArgumentException( 'env names cannot be empty' );
+			}
+
+			$env[ (string) $name ] = self::text( $setting, 'env' );
+		}
+
+		return $env;
 	}
 }

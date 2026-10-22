@@ -39,7 +39,7 @@ final readonly class Docblocks {
 	/**
 	 * Tokens that may sit between a docblock and what it documents.
 	 *
-	 * @var int[]
+	 * @var list<int>
 	 */
 	private const array SKIPPABLE = array(
 		T_WHITESPACE,
@@ -55,7 +55,7 @@ final readonly class Docblocks {
 	/**
 	 * Tokens that declare something worth documenting.
 	 *
-	 * @var int[]
+	 * @var list<int>
 	 */
 	private const array DECLARATIONS = array( T_FUNCTION, T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM );
 
@@ -67,7 +67,7 @@ final readonly class Docblocks {
 	 * @param string[] $roots Directories (read recursively) or single files.
 	 *                        Only `.php` files are read.
 	 *
-	 * @return array<int, array{file: string, line: int, name: string}> Sorted
+	 * @return list<array{file: string, line: int, name: string}> Sorted
 	 *         the way report() prints them.
 	 */
 	public static function scan( array $roots ): array {
@@ -91,7 +91,7 @@ final readonly class Docblocks {
 	 *
 	 * @param string $source PHP source, opening tag and all.
 	 *
-	 * @return array<int, array{line: int, name: string}>
+	 * @return list<array{line: int, name: string}>
 	 */
 	public static function in( string $source ): array {
 		// `use function Foo\{ bar, baz };` tokenises as T_FUNCTION but
@@ -167,7 +167,7 @@ final readonly class Docblocks {
 	/**
 	 * The name a declaration gives, or null for a closure.
 	 *
-	 * @param array<int, mixed> $tokens Every token.
+	 * @param list<string|array{0: int, 1: string, 2: int}> $tokens Every token.
 	 * @param int               $at     The declaring keyword's index.
 	 * @param int               $count  How many tokens there are.
 	 *
@@ -192,7 +192,7 @@ final readonly class Docblocks {
 	/**
 	 * Whether the `class` keyword at an index follows `new`.
 	 *
-	 * @param array<int, mixed> $tokens Every token.
+	 * @param list<string|array{0: int, 1: string, 2: int}> $tokens Every token.
 	 * @param int               $at     The keyword's index.
 	 *
 	 * @return bool
@@ -215,7 +215,7 @@ final readonly class Docblocks {
 	 * Walks back over modifiers, whitespace and attributes; anything else
 	 * means there is none.
 	 *
-	 * @param array<int, mixed> $tokens Every token.
+	 * @param list<string|array{0: int, 1: string, 2: int}> $tokens Every token.
 	 * @param int               $at     The declaring keyword's index.
 	 *
 	 * @return bool
@@ -263,7 +263,7 @@ final readonly class Docblocks {
 	 *
 	 * @param string[] $roots Directories or files.
 	 *
-	 * @return string[]
+	 * @return list<string>
 	 */
 	private static function files( array $roots ): array {
 		$files = array();
@@ -279,7 +279,7 @@ final readonly class Docblocks {
 			}
 
 			foreach ( new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS ) ) as $file ) {
-				if ( 'php' === $file->getExtension() ) {
+				if ( $file instanceof \SplFileInfo && 'php' === $file->getExtension() ) {
 					$files[] = $file->getPathname();
 				}
 			}

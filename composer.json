@@ -1,7 +1,7 @@
 {
   "name": "sugarcommerce/dev-tools",
   "description": "Development checks for the SugarCommerce family and the apps built on it: a docblock coverage report that can gate a build, and a headless-Chrome smoke test that loads every page and fails on any console error. Zero dependencies.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "homepage": "https://github.com/sugarcommerce/dev-tools",
