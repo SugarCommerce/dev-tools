@@ -856,7 +856,7 @@ final class Smoke {
 	 * @return bool
 	 */
 	private static function matches( string $pattern, string $line ): bool {
-		$regex = 1 === preg_match( '/^([\/#~]).+\1[imsxu]*$/', $pattern );
+		$regex = 1 === preg_match( '/^([\/#~]).+\1[imsxu]*$/D', $pattern );
 
 		return $regex ? 1 === @preg_match( $pattern, $line ) : str_contains( $line, $pattern );
 	}
