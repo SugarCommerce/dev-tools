@@ -1,13 +1,18 @@
 {
   "name": "sugarcommerce/dev-tools",
-  "description": "Development checks for the SugarCommerce family and the apps built on it: a docblock coverage report that can gate a build, and a headless-Chrome smoke test that loads every page and fails on any console error. Zero dependencies.",
-  "version": "1.1.0",
+  "description": "Development checks for the SugarCommerce family and the apps built on it: a docblock coverage report that can gate a build, a headless-Chrome smoke test that loads every page and fails on any console error, and small real demo media (WAV, PNG, PDF, ZIP) made in code, the same bytes on every run.",
+  "version": "1.2.0",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "homepage": "https://github.com/sugarcommerce/dev-tools",
   "authors": [ { "name": "David Sherlock", "homepage": "https://arraypress.com/" } ],
-  "keywords": ["docblocks", "lint", "smoke-test", "headless-chrome", "dev"],
-  "require": { "php": ">=8.5" },
+  "keywords": ["docblocks", "lint", "smoke-test", "headless-chrome", "fixtures", "demo-data", "dev"],
+  "require": {
+    "php": ">=8.5",
+    "ext-gd": "*",
+    "sugarcommerce/text-pdf": "^1.1",
+    "sugarcommerce/zip-stream": "^1.0"
+  },
   "require-dev": { "phpunit/phpunit": "^13.0" },
   "autoload": { "psr-4": { "SugarCommerce\\DevTools\\": "src/" } },
   "autoload-dev": { "psr-4": { "SugarCommerce\\DevTools\\Tests\\": "tests/" } },

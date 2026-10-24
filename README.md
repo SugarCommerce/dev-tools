@@ -1,6 +1,6 @@
 # dev-tools
 
-Development checks for the SugarCommerce family and the apps built on it: a docblock coverage report that can gate a build, and a headless-Chrome smoke test that loads every page and fails on any console error. Zero dependencies.
+Development checks for the SugarCommerce family and the apps built on it: a docblock coverage report that can gate a build, a headless-Chrome smoke test that loads every page and fails on any console error, and small real demo media — WAV, PNG, PDF, ZIP — made in code, the same bytes on every run.
 
 Install it as a dev dependency. Nothing here runs in production.
 
@@ -28,10 +28,11 @@ It is built around the ways this goes wrong:
 - 🔌 **Generic** — the seed command, the server command and the pages are arguments; pages can be printed by a command run after seeding, for addresses that depend on seeded data.
 - 🧹 **Self-cleaning** — a scratch directory per run, removed afterwards unless `--keep`; free port; per-page profiles; deadlines.
 - 🪵 **PHP error log** — read after the run, expected lines ignorable by text or regex, the rest tallied commonest first.
+- 🎵 **`DemoMedia`** — a seed's files as real media, chosen by name: a chord, artwork, a one-page PDF, a ZIP of stems. Byte-identical on every run.
 
 ## Requirements
 
-PHP 8.5+. `smoke` needs Chrome or Chromium, and `pkill` (macOS, Linux).
+PHP 8.5+ with GD. `smoke` needs Chrome or Chromium, and `pkill` (macOS, Linux). `DemoMedia` uses [sugarcommerce/text-pdf](https://github.com/sugarcommerce/text-pdf) and [sugarcommerce/zip-stream](https://github.com/sugarcommerce/zip-stream), installed with it.
 
 ## Installation
 
@@ -102,6 +103,35 @@ FAIL /s/demo
 
 Exits 0 when every page is clean, 1 on any console error, PHP log line or failed seed, and 2 when it could not run (no Chrome, a server that did not start, a bad option).
 
+## Demo media
+
+A seed that uploads text files named `.wav` and `.pdf` gives every player and preview in a local install nothing to show. `DemoMedia` makes the real thing, small, in code — no binary blobs in the repository:
+
+```php
+use SugarCommerce\DevTools\DemoMedia;
+
+$media = new DemoMedia(
+    note: 'Acme demo file — made by bin/seed.php, not a real product.',   // under each PDF's heading
+    creator: 'Acme seed',                                                 // the PDF's Creator
+    placeholder: "Acme seed file\n{name}\nPlaceholder content.\n",          // any other extension, and each ZIP's README
+);
+
+$body = $media->for( 'Midnight Drive - Master.wav' );
+$key  = hash( 'sha256', $body );
+```
+
+| Name | Bytes |
+|---|---|
+| `*.wav` | Three seconds of 16-bit mono at 22,050 Hz: a chord whose root comes from the name, faded in and out; pulsed when the name contains "beat". |
+| `*.png` | 600 × 600 artwork in the name's colours, with the name across it. |
+| `*.pdf` | One page headed with the name: licence terms when it contains "licence", a short guide otherwise. |
+| `*.zip` | A folder named for the archive: three one-second stems and a README. |
+| anything else | The placeholder, with `{name}` filled in. |
+
+The same name gives the same bytes on every run — the PDF's creation date and the ZIP's timestamps are fixed (`DemoMedia::MADE`, 2026-01-01, or `made:`), and nothing is random — so a seed that stores files by their digest writes the same keys over the same objects instead of leaving a new set behind each time. Different names give different files.
+
+Each kind is there on its own too, for content of your choosing: `DemoMedia::wav( 440.0, 1.0, beat: true )`, `DemoMedia::png( 'Cover', 300 )`, `$media->pdf( $title, $paragraphs )`, `$media->zip( [ 'a.txt' => 'A' ] )`, `$media->text( $name )`.
+
 ## Testing
 
 ```bash
@@ -109,7 +139,7 @@ composer install
 composer test
 ```
 
-50 tests. The docblock scanner against every kind of declaration, modifiers, stacked attributes with brackets inside them, `::class`, closures, anonymous classes, multi-line `use function` and line numbers, and output byte-identical to the script it replaced. The smoke checker's option parsing, Chrome discovery order, free ports, console and error-log parsing, and a whole run end to end — seed, environment, a real PHP server and a stand-in browser — that reports one clean page and one failing one.
+80 tests. The docblock scanner against every kind of declaration, modifiers, stacked attributes with brackets inside them, `::class`, closures, anonymous classes, multi-line `use function` and line numbers, and output byte-identical to the script it replaced. The smoke checker's option parsing, Chrome discovery order, free ports, console and error-log parsing, and a whole run end to end — seed, environment, a real PHP server and a stand-in browser — that reports one clean page and one failing one. Demo media read the way a player reads it: a RIFF header that agrees with its length, a PNG signature and IHDR, a one-page PDF with its fixed date, a ZIP walked from its end-of-central-directory record to every member and its CRC — and the same bytes twice for every kind.
 
 ## License
 
